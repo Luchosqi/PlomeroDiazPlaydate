@@ -1,0 +1,14 @@
+{
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "type": "playdate",
+            "request": "launch",
+            "name": "Playdate: Debug",
+            "program": "${workspaceFolder}",
+            "stopOnEntry": false,
+            "console": "integratedTerminal",
+            "preLaunchTask": "pdc-build"
+        }
+    ]
+}
