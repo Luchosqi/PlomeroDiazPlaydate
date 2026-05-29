@@ -305,62 +305,45 @@ function GameManager._updateTitle()
     end
     if diazImg then diazImg:draw(diazX, diazY) end
 
-    -- ── Panel de título (negro exterior, blanco interior) ─────
-    local px, py, pw, ph = 38, 6, 324, 62
+    -- ── Panel de título SUPERIOR — solo "Bienvenido a Plomero Diaz" ──
+    -- [FIX v5.1] Panel reducido a 1 sola línea de texto.
+    -- pw=324 (margen 38px a cada lado), ph=32 (ajustado a 1 línea de Nontendo Bold ~16px + 8px arriba + 8px abajo)
+    -- py=6 deja un margen cómodo desde el borde superior.
+    local px, py, pw, ph = 38, 6, 324, 32
     gfx.setColor(gfx.kColorBlack)
-    gfx.fillRoundRect(px, py, pw, ph, 10)
+    gfx.fillRoundRect(px, py, pw, ph, 8)
     gfx.setColor(gfx.kColorWhite)
-    gfx.fillRoundRect(px + 3, py + 3, pw - 6, ph - 6, 8)
+    gfx.fillRoundRect(px + 3, py + 3, pw - 6, ph - 6, 6)
 
-    -- [NEW v5.0] Texto "Bienvenido a Plomero Díaz" en Nontendo Bold
+    -- Texto centrado verticalmente dentro del panel (py + 8 = margen superior de 8px)
     gfx.setColor(gfx.kColorBlack)
     useBoldFont()
     gfx.drawTextAligned("Bienvenido a Plomero Diaz", 200, py + 8, kTextAlignment.center)
     useSystemFont()
 
-    -- Línea separadora
-    gfx.setColor(gfx.kColorBlack)
-    gfx.drawLine(px + 20, py + 26, px + pw - 20, py + 26)
-
-    -- Instrucciones rápidas (fuente del sistema, pequeña)
-    gfx.drawTextAligned("Manivela=Bombear  |  Flechas=QTE  |  B=Calista",
-                         200, py + 33, kTextAlignment.center)
-
-    -- ── [NEW v5.0] "Presiona [A] para empezar" parpadeante ────
-    -- Composición: texto | sprite btnA | texto  todo sobre panel negro
+    -- ── Panel INFERIOR parpadeante — "Presiona A para jugar" ──────
+    -- [FIX v5.2] Mismo estilo que el panel superior:
+    --   * Relleno negro exterior → relleno blanco interior
+    --   * Sin sprite incrustado ni division del rectangulo
+    --   * gfx.kColorBlack ANTES del texto para evitar conflicto de colores
+    -- panY=202 → borde inferior en Y=232 → margen inferior 8px OK
     if (math.floor(titleFrame / 18) % 2) == 0 then
-        local by2   = 210
-        local panW  = 226
-        local panX  = math.floor((400 - panW) / 2)
+        local panW = 260
+        local panH = 30
+        local panX = math.floor((400 - panW) / 2)   -- = 70, centrado
+        local panY = 202
 
-        -- Panel negro de fondo
+        -- Borde negro exterior (identico al panel superior)
         gfx.setColor(gfx.kColorBlack)
-        gfx.fillRoundRect(panX, by2 - 2, panW, 24, 6)
+        gfx.fillRoundRect(panX, panY, panW, panH, 8)
+        -- Relleno blanco interior
         gfx.setColor(gfx.kColorWhite)
-        gfx.drawRoundRect(panX + 1, by2 - 1, panW - 2, 22, 5)
+        gfx.fillRoundRect(panX + 3, panY + 3, panW - 6, panH - 6, 6)
 
-        -- "Presiona " (izquierda del ícono)
+        -- Texto negro sobre blanco, Nontendo Bold, perfectamente centrado
+        gfx.setColor(gfx.kColorBlack)
         useBoldFont()
-        gfx.setColor(gfx.kColorWhite)
-        local tx1 = panX + 14
-        gfx.drawText("Presiona", tx1, by2 + 3)
-
-        -- Sprite botón A (24×24, pero se escala visualmente centrado en 20px)
-        if btnAImg then
-            -- Dibujar en modo invertido para que se vea blanco sobre negro
-            gfx.setImageDrawMode(gfx.kDrawModeFillWhite)
-            btnAImg:draw(tx1 + 72, by2 + 1)
-            gfx.setImageDrawMode(gfx.kDrawModeCopy)
-        else
-            -- Fallback: cuadrado con letra A
-            gfx.setColor(gfx.kColorWhite)
-            gfx.drawRoundRect(tx1 + 72, by2 + 2, 18, 16, 3)
-            gfx.drawTextAligned("A", tx1 + 81, by2 + 3, kTextAlignment.center)
-        end
-
-        -- "para empezar" (derecha del ícono)
-        gfx.setColor(gfx.kColorWhite)
-        gfx.drawText(" para empezar", tx1 + 98, by2 + 3)
+        gfx.drawTextAligned("Presiona A para jugar", 200, panY + 8, kTextAlignment.center)
         useSystemFont()
     end
 
@@ -439,12 +422,14 @@ function GameManager._updateGameplay()
         levelClearTimer  = 90
         flushFrame       = 1
         flushTimer       = 0
-        AudioManager.stopMusic()
+        -- [FIX v5.1] NO detenemos la música al cambiar de nivel;
+        -- AudioManager.update() deja de llamarse (STATE_LEVELCLEAR no lo llama)
+        -- pero el fileplayer sigue corriendo en segundo plano sin cortes.
     elseif water >= 100 then
         state         = STATE_GAMEOVER
         gameoverFrame = 0
         triggerShake(6, 30)
-        AudioManager.stopMusic()
+        -- [FIX v5.1] Tampoco detenemos en Game Over; se corta solo al ir al título.
     end
 end
 
@@ -515,6 +500,8 @@ function GameManager._updateLevelClear()
 
     if levelClearTimer <= 0 then
         resetForLevel(level)
+        -- [FIX v5.1] startMusic() detecta si ya está sonando y NO la reinicia.
+        -- Solo la arranca si por algún motivo se detuvo (primer nivel, etc.)
         AudioManager.startMusic()
         state = STATE_GAMEPLAY
     end

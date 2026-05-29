@@ -56,12 +56,16 @@ end
 function AudioManager.startMusic()
     ensureLoaded()
     if not loaded or not player then return end
+    -- [FIX v1.1] Solo arrancar si no está ya reproduciendo.
+    -- NO reseteamos el rate aquí: si venimos de un cambio de nivel,
+    -- el rate puede ya estar elevado (pánico del nivel anterior)
+    -- y el lerp en update() lo llevará suavemente al valor correcto.
     if not player:isPlaying() then
-        player:play(0)   -- 0 = loop infinito
+        player:play(0)   -- 0 = loop infinito en Playdate SDK
+        currentRate = RATE_NORMAL
+        targetRate  = RATE_NORMAL
+        player:setRate(RATE_NORMAL)
     end
-    player:setRate(RATE_NORMAL)
-    currentRate = RATE_NORMAL
-    targetRate  = RATE_NORMAL
     musicOn = true
 end
 
