@@ -11,10 +11,10 @@ Layout = {}
 Layout.BG_X = 0
 Layout.BG_Y = 0
 
--- ── Jugador (Profesor Díaz) ───────────────────────────────────
--- Zona izquierda, trabajando hacia la derecha
-Layout.PLAYER_X = 75
-Layout.PLAYER_Y = 108
+-- ── Jugador (Profesor Díaz) ─────────────────────────────────
+-- Sprites ahora son 120×150 px (1.5×), posición ajustada
+Layout.PLAYER_X = 30
+Layout.PLAYER_Y = 75
 
 -- ── Inodoro ───────────────────────────────────────────────────
 -- Centro-derecha de la pantalla, alineado con el bg_bathroom.png

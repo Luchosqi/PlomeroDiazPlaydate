@@ -211,12 +211,17 @@ function QTEManager.draw()
 
     if not active or currentObs == nil then return end
 
-    -- ── Obstáculo flotando en la taza ────────────────────────
+    -- ── Obstáculo flotando SOBRE la taza (no dentro del agua) ──
     local bx, by, bw, bh = Toilet.getBowlBounds()
     local obsImg = obsImages[currentObs.img]
     if obsImg then
-        local floatOffset = math.floor(math.sin(ms / 350) * 3)
-        obsImg:draw(bx + math.floor(bw / 2) - 12, by + math.floor(bh / 2) - 12 + floatOffset)
+        -- Flotando justo encima del borde superior del bowl
+        local floatOffset = math.floor(math.sin(ms / 350) * 4)
+        -- obsX centrado horizontalmente sobre el bowl
+        local obsX = bx + math.floor(bw / 2) - 12
+        -- obsY: por encima del borde superior del bowl (-28px) más animación
+        local obsY = by - 28 + floatOffset
+        obsImg:draw(obsX, obsY)
     end
 
     -- ── Barra de tiempo (encima del panel QTE) ────────────────
