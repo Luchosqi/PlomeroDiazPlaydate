@@ -30,9 +30,16 @@ Layout.BOWL_Y = Layout.TOILET_Y + 70
 Layout.BOWL_W = 76
 Layout.BOWL_H = 56
 
--- Centro exacto de la taza (para centrar obstáculos)
+-- Centro exacto de la taza (agua y splash)
 Layout.BOWL_CENTER_X = Layout.BOWL_X + math.floor(Layout.BOWL_W / 2)
 Layout.BOWL_CENTER_Y = Layout.BOWL_Y + math.floor(Layout.BOWL_H / 2)
+
+-- ── Espacio central entre Díaz y el Inodoro ──────────────────
+-- Díaz ocupa X: PLAYER_X → PLAYER_X + 120 (sprite 120×150)
+-- Inodoro empieza en TOILET_X
+-- El obstáculo de QTE aparece en el centro de ese espacio vacío
+Layout.OBS_CENTER_X = math.floor((Layout.PLAYER_X + 120 + Layout.TOILET_X) / 2)
+Layout.OBS_CENTER_Y = 120   -- altura media de la escena de juego
 
 -- ── HUD — Barra de Stamina (izquierda) ───────────────────────
 Layout.STA_X = 3

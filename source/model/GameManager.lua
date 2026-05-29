@@ -1,8 +1,12 @@
 -- =============================================================
--- model/GameManager.lua
--- Máquina de estados global — Versión 3.0
--- Cambios: fix math.random, 3 fondos por nivel, título animado,
---          panel level clear estilizado, obstáculos sobre inodoro
+-- model/GameManager.lua  — Versión 4.0
+-- CAMBIOS v4.0:
+--   [FIX]  setOffset siempre vuelve a (0,0) al terminar el shake
+--   [NEW]  3 fondos distintos que rotan en el título cada 4 s
+--   [NEW]  Título: Díaz animado + obstáculos flotantes + fondo rotando
+--   [NEW]  Título: texto "Presiona [btn_A] para empezar" con sprite A
+--   [NEW]  Game Over / Level Clear: textos siempre blancos sobre negro
+--   [FIX]  Se eliminan rectángulos negros vacíos fantasma
 -- =============================================================
 
 GameManager = {}
@@ -13,7 +17,6 @@ local STATE_GAMEPLAY   <const> = 2
 local STATE_LEVELCLEAR <const> = 3
 local STATE_GAMEOVER   <const> = 4
 
--- Sub-estados de gameplay
 local SUB_RUNNING    <const> = 1
 local SUB_CALISTENIA <const> = 2
 local SUB_PANIC      <const> = 3
@@ -28,7 +31,7 @@ local levelClearTimer = 0
 local titleFrame      = 0
 local gameoverFrame   = 0
 
--- Animación de flush
+-- ── Flush ─────────────────────────────────────────────────────
 local flushTable = nil
 local flushFrame = 1
 local flushTimer = 0
@@ -47,51 +50,54 @@ local function triggerShake(intensity, duration)
 end
 
 local function updateShake()
+    -- [FIX] Siempre llamamos setOffset(0,0) cuando termina el shake
+    -- para evitar el "cuadrado misterioso" que aparece por un offset residual
     if shakeDuration > 0 then
         shakeDuration -= 1
-        -- BUGFIX: math.floor garantiza enteros para math.random
-        local iInt = math.floor(shakeIntensity)
-        if iInt < 1 then iInt = 1 end
-        local ox = math.random(-iInt, iInt)
-        local oy = math.random(-iInt, iInt)
-        playdate.display.setOffset(ox, oy)
+        local iInt = math.max(1, math.floor(shakeIntensity))
+        playdate.display.setOffset(math.random(-iInt, iInt), math.random(-iInt, iInt))
         shakeIntensity = shakeIntensity * 0.85
-        if shakeDuration <= 0 then
-            playdate.display.setOffset(0, 0)
-            shakeIntensity = 0
-        end
+    else
+        -- Siempre resetear aunque no haya shake activo (garantiza posición cero)
+        playdate.display.setOffset(0, 0)
+        shakeIntensity = 0
     end
 end
 
--- ── Imágenes y fuentes ────────────────────────────────────────
-local bgImgs   = {}   -- tabla de 3 fondos: bgImgs[1], [2], [3]
-local bgImg    = nil  -- fondo activo (apunta a bgImgs[...])
+-- ── Assets ────────────────────────────────────────────────────
+local bgImgs = {}           -- 3 fondos: bgImgs[1..3]
+local bgImg  = nil          -- fondo activo durante gameplay
 
--- Sprites del título
-local titleDiazImgs   = {}   -- idle, calistenia, work1
-local titleDiazFrame  = 1
-local titleDiazTimer  = 0
-local TITLE_DIAZ_DUR  <const> = 40  -- frames por pose
+-- Para el título: fondo rota cada BG_TITLE_SWITCH_SECS segundos
+local titleBgIdx        = 1
+local titleBgTimer      = 0
+local BG_TITLE_SWITCH   <const> = 30 * 4   -- 4 segundos a 30fps
+
+-- Sprites de Díaz usados en el título
+local titleDiazImgs  = {}
+local titleDiazFrame = 1
+local titleDiazTimer = 0
+local TITLE_DIAZ_DUR <const> = 40   -- frames por pose
 
 -- Obstáculos flotantes del título
-local titleObs = {}
+local titleObs       = {}
 local obsImagesTitle = {}
 
--- Fuente personalizada
-local titleFont = nil
+-- Sprite del botón A (para "Presiona [A] para empezar")
+local btnAImg = nil
 
 local function loadAssets()
-    -- Flush animation
+    -- Animación de flush
     if not flushTable then
         flushTable = playdate.graphics.imagetable.new("assets/images/flush")
     end
 
-    -- 3 fondos de baño
+    -- [NEW] 3 fondos distintos. bg_bathroom_1 = ladrillos, _2 = azulejos, _3 = grafitis
     for i = 1, 3 do
         if not bgImgs[i] then
-            -- Intenta cargar bg_bathroom_1, _2, _3; si no existe usa el base
             local img = playdate.graphics.image.new("assets/images/bg_bathroom_" .. i)
             if not img then
+                -- Fallback: usar el fondo genérico si el numerado no existe
                 img = playdate.graphics.image.new("assets/images/bg_bathroom")
             end
             bgImgs[i] = img
@@ -110,20 +116,17 @@ local function loadAssets()
     if #obsImagesTitle == 0 then
         for _, name in ipairs(obsNames) do
             local img = playdate.graphics.image.new("assets/images/" .. name)
-            if img then
-                table.insert(obsImagesTitle, img)
-            end
+            if img then table.insert(obsImagesTitle, img) end
         end
     end
 
-    -- Fuente personalizada (Roobert si existe, si no usa la del sistema)
-    if not titleFont then
-        titleFont = playdate.graphics.font.new("assets/fonts/font-Roobert-24-Bold")
-        -- Si no existe, setFont falla silenciosamente y se usa la de sistema
+    -- [NEW] Sprite del botón A para incrustarlo en el texto "Presiona [A]"
+    if not btnAImg then
+        btnAImg = playdate.graphics.image.new("assets/images/ui_button_a")
     end
 end
 
--- ── Seleccionar fondo según nivel ────────────────────────────
+-- ── Seleccionar fondo por nivel (ciclo módulo 3) ──────────────
 local function getBgForLevel(lvl)
     local idx = ((lvl - 1) % 3) + 1
     return bgImgs[idx] or bgImgs[1]
@@ -132,15 +135,16 @@ end
 -- ── Obstáculos flotantes del título ──────────────────────────
 local function initTitleObs()
     titleObs = {}
-    local count = 5
-    for i = 1, count do
+    -- Necesitamos al menos 1 obstáculo para evitar crash en math.random
+    if #obsImagesTitle == 0 then return end
+    for i = 1, 5 do
         table.insert(titleObs, {
             x     = math.random(0, 380),
-            y     = math.random(50, 200),
-            phase = math.random(0, 628) / 100.0,   -- fase inicial aleatoria
-            speed = 0.4 + math.random() * 0.4,      -- velocidad horizontal
-            amp   = 10 + math.random() * 12,         -- amplitud vertical
-            img   = obsImagesTitle[math.random(#obsImagesTitle)] or nil,
+            y     = math.random(50, 190),
+            phase = math.random(0, 628) / 100.0,
+            speed = 0.5 + math.random() * 0.6,
+            amp   = 8 + math.random() * 14,
+            img   = obsImagesTitle[math.random(#obsImagesTitle)],
         })
     end
 end
@@ -149,21 +153,29 @@ local function updateTitleObs(ms)
     local t = ms / 1000.0
     for _, o in ipairs(titleObs) do
         o.x = o.x + o.speed
-        if o.x > 420 then o.x = -30 end
-        -- Movimiento vertical suave con sin
-        o.drawY = o.y + math.floor(math.sin(t * 1.5 + o.phase) * o.amp)
+        if o.x > 430 then o.x = -36 end
+        o.drawY = o.y + math.floor(math.sin(t * 1.4 + o.phase) * o.amp)
     end
 end
 
 local function drawTitleObs(gfx)
     for _, o in ipairs(titleObs) do
         if o.img then
-            o.img:draw(math.floor(o.x), math.floor(o.drawY or o.y))
+            -- [NEW] Dibujar obstáculos con un círculo blanco de fondo para
+            --       que sean visibles sobre cualquier fondo
+            local ox = math.floor(o.x)
+            local oy = math.floor(o.drawY or o.y)
+            local r  = 18
+            gfx.setColor(gfx.kColorWhite)
+            gfx.fillCircleAtPoint(ox + 14, oy + 14, r)
+            gfx.setColor(gfx.kColorBlack)
+            gfx.drawCircleAtPoint(ox + 14, oy + 14, r)
+            o.img:draw(ox, oy)
         end
     end
 end
 
--- ── Funciones internas ────────────────────────────────────────
+-- ── Reset de nivel ────────────────────────────────────────────
 local function resetForLevel(lvl)
     subState   = SUB_RUNNING
     panicTimer = 0
@@ -180,6 +192,8 @@ function GameManager.init()
     level      = 1
     state      = STATE_TITLE
     titleFrame = 0
+    titleBgIdx = 1
+    titleBgTimer = 0
     loadAssets()
     bgImg = getBgForLevel(1)
     ComboSystem.init()
@@ -202,91 +216,113 @@ function GameManager.update()
     elseif state == STATE_LEVELCLEAR then GameManager._updateLevelClear()
     elseif state == STATE_GAMEOVER   then GameManager._updateGameOver()
     end
-
-    -- HUD encima de todo durante gameplay
     HUD.draw(state, subState, level)
-
-    -- Screen shake al final del frame
     updateShake()
 end
 
--- ── Pantalla de Título (Versión 3.0 — rediseñada) ─────────────
+-- ─────────────────────────────────────────────────────────────
+-- ── PANTALLA DE TÍTULO — Versión 4.0 ────────────────────────
+-- [NEW] Fondo rota cada 4 s entre los 3 diseños
+-- [NEW] Díaz animado al centro (idle→work→calistenia)
+-- [NEW] Obstáculos flotan con círculo blanco de fondo
+-- [NEW] "Presiona [sprite A] para empezar" — sin panel vacío
+-- ─────────────────────────────────────────────────────────────
 function GameManager._updateTitle()
     local gfx = playdate.graphics
     local ms  = playdate.getCurrentTimeMilliseconds()
     titleFrame += 1
 
-    -- ── Fondo del primer nivel ────────────────────────────────
-    if bgImg then
-        bgImg:draw(Layout.BG_X, Layout.BG_Y)
+    -- [NEW] Rotar el fondo entre los 3 diseños cada BG_TITLE_SWITCH frames
+    titleBgTimer += 1
+    if titleBgTimer >= BG_TITLE_SWITCH then
+        titleBgTimer = 0
+        titleBgIdx   = (titleBgIdx % 3) + 1
+    end
+    local currentBg = bgImgs[titleBgIdx]
+    if currentBg then
+        currentBg:draw(Layout.BG_X, Layout.BG_Y)
     else
         gfx.setColor(gfx.kColorBlack)
         gfx.fillRect(0, 0, 400, 240)
     end
 
-    -- ── Obstáculos flotantes en el fondo ──────────────────────
+    -- [NEW] Obstáculos flotantes con círculo blanco de contraste
     updateTitleObs(ms)
     drawTitleObs(gfx)
 
-    -- ── Díaz animado al centro ────────────────────────────────
-    -- Cicla entre idle → calistenia → work (cambia cada TITLE_DIAZ_DUR frames)
+    -- [NEW] Díaz animado al centro. Cicla idle → work → calistenia
     titleDiazTimer += 1
     if titleDiazTimer >= TITLE_DIAZ_DUR then
         titleDiazTimer = 0
         titleDiazFrame = (titleDiazFrame % 3) + 1
     end
-    local diazX = 185
-    local diazY = 110
+    -- Centrar Díaz: sprite 120×150, centrado horizontalmente
+    local diazW, diazH = 120, 150
+    local diazX = math.floor((400 - diazW) / 2)
+    local diazY = 70
     local diazImg = nil
     if titleDiazFrame == 1 then
         diazImg = titleDiazImgs[1]   -- idle
     elseif titleDiazFrame == 2 then
-        diazImg = titleDiazImgs[2]   -- calistenia
-    elseif titleDiazFrame == 3 then
-        -- work: usar imagetable (frame 1 o 2 alternando)
+        -- work: alternar frames de la imagetable
         local wt = titleDiazImgs[3]
-        if wt then
-            local wf = (math.floor(ms / 200) % 3) + 1
-            diazImg = wt:getImage(wf)
-        end
+        if wt then diazImg = wt:getImage((math.floor(ms / 200) % 3) + 1) end
+    elseif titleDiazFrame == 3 then
+        diazImg = titleDiazImgs[2]   -- calistenia
     end
-    if diazImg then
-        diazImg:draw(diazX, diazY)
-    end
+    if diazImg then diazImg:draw(diazX, diazY) end
 
-    -- ── Panel superior con título del juego ───────────────────
-    local px, py, pw, ph = 50, 12, 300, 95
+    -- ── Panel superior del título (negro sólido + bordes) ─────
+    local px, py, pw, ph = 40, 8, 320, 58
     gfx.setColor(gfx.kColorBlack)
     gfx.fillRoundRect(px, py, pw, ph, 10)
     gfx.setColor(gfx.kColorWhite)
     gfx.drawRoundRect(px + 2, py + 2, pw - 4, ph - 4, 8)
-    gfx.drawRoundRect(px + 4, py + 4, pw - 8, ph - 6, 6)
 
-    -- Texto del título (fuente personalizada si cargó)
-    if titleFont then
-        gfx.setFont(titleFont)
-    end
-    gfx.drawTextAligned("*PLOMERO DÍAZ*", 200, py + 10, kTextAlignment.center)
-    -- Restaurar fuente del sistema para el resto
-    gfx.setFont(playdate.graphics.font.new("font/Roobert-10-Bold") or playdate.graphics.getSystemFont())
-
-    gfx.drawTextAligned("¡Salva la facultad del diluvio!", 200, py + 34, kTextAlignment.center)
+    -- Título grande en blanco (Markdown bold → negrita del sistema)
+    gfx.drawTextAligned("*PLOMERO DÍAZ*", 200, py + 8, kTextAlignment.center)
 
     gfx.setColor(gfx.kColorWhite)
-    gfx.drawLine(70, py + 50, 330, py + 50)
+    gfx.drawLine(px + 20, py + 28, px + pw - 20, py + 28)
 
-    -- Instrucciones compactas
-    gfx.drawTextAligned("Manivela=Bombear | Flechas=QTE | B=Calistenia", 200, py + 58, kTextAlignment.center)
-    gfx.drawTextAligned("Sube el agua para ganar cada nivel", 200, py + 74, kTextAlignment.center)
+    -- Subtítulo
+    gfx.drawTextAligned("¡Salva la facultad del diluvio!", 200, py + 34, kTextAlignment.center)
 
-    -- ── Parpadeo "PRESS A" en la parte inferior ───────────────
+    -- ── Instrucciones pequeñas (sin rectángulo extra) ─────────
+    -- Panel semitransparente de instrucciones
+    local ix, iy, iw, ih = 55, 68, 290, 22
+    gfx.setColor(gfx.kColorBlack)
+    gfx.fillRoundRect(ix, iy, iw, ih, 5)
+    gfx.setColor(gfx.kColorWhite)
+    gfx.drawTextAligned("Manivela=Bombear  |  Flechas=QTE  |  B=Calistenia",
+                         200, iy + 4, kTextAlignment.center)
+
+    -- ── [NEW] "Presiona [A] para empezar" con sprite del botón ──
+    -- Parpadeo para llamar la atención
     if (math.floor(titleFrame / 18) % 2) == 0 then
-        local bx, by2, bw2, bh2 = 110, 205, 180, 22
+        local by2 = 208
+        -- Panel negro para contraste
         gfx.setColor(gfx.kColorBlack)
-        gfx.fillRoundRect(bx, by2, bw2, bh2, 6)
+        gfx.fillRoundRect(85, by2 - 2, 230, 24, 6)
         gfx.setColor(gfx.kColorWhite)
-        gfx.drawRoundRect(bx + 1, by2 + 1, bw2 - 2, bh2 - 2, 5)
-        gfx.drawTextAligned("[ Presiona A para jugar ]", 200, by2 + 5, kTextAlignment.center)
+        gfx.drawRoundRect(86, by2 - 1, 228, 22, 5)
+
+        -- Texto "Presiona"
+        gfx.drawText("Presiona", 95, by2 + 3)
+        -- Sprite del botón A incrustado (24×24, pero lo escalamos visualmente a 16px)
+        if btnAImg then
+            btnAImg:draw(164, by2 + 1)  -- posición justo después del texto
+        else
+            -- Fallback: rectángulo con letra A
+            gfx.setColor(gfx.kColorWhite)
+            gfx.fillRect(165, by2 + 2, 14, 14)
+            gfx.setColor(gfx.kColorBlack)
+            gfx.drawRect(165, by2 + 2, 14, 14)
+            gfx.drawTextAligned("A", 172, by2 + 3, kTextAlignment.center)
+        end
+        -- Texto "para empezar"
+        gfx.setColor(gfx.kColorWhite)
+        gfx.drawText("para empezar", 192, by2 + 3)
     end
 
     if playdate.buttonJustPressed(playdate.kButtonA) then
@@ -297,12 +333,13 @@ function GameManager._updateTitle()
     end
 end
 
--- ── Gameplay ──────────────────────────────────────────────────
+-- ─────────────────────────────────────────────────────────────
+-- ── GAMEPLAY ─────────────────────────────────────────────────
+-- ─────────────────────────────────────────────────────────────
 function GameManager._updateGameplay()
     local gfx   = playdate.graphics
     local water = Toilet.getWaterLevel()
 
-    -- ── Gestión de sub-estados ──────────────────────────────
     if playdate.buttonIsPressed(playdate.kButtonB) then
         if subState ~= SUB_CALISTENIA then
             if QTEManager.isActive() then
@@ -312,12 +349,9 @@ function GameManager._updateGameplay()
             subState = SUB_CALISTENIA
         end
     else
-        if subState == SUB_CALISTENIA then
-            subState = SUB_RUNNING
-        end
+        if subState == SUB_CALISTENIA then subState = SUB_RUNNING end
     end
 
-    -- Transición a/desde PANIC
     if subState == SUB_RUNNING and water >= 80 then
         subState   = SUB_PANIC
         panicTimer = 150
@@ -326,12 +360,9 @@ function GameManager._updateGameplay()
     end
     if subState == SUB_PANIC then
         panicTimer -= 1
-        if panicTimer <= 0 and water < 80 then
-            subState = SUB_RUNNING
-        end
+        if panicTimer <= 0 and water < 80 then subState = SUB_RUNNING end
     end
 
-    -- ── Actualizar sistemas ─────────────────────────────────
     local panicMult = (subState == SUB_PANIC) and 1.5 or 1.0
 
     if subState == SUB_CALISTENIA then
@@ -347,26 +378,14 @@ function GameManager._updateGameplay()
         QTEManager.update(level)
     end
 
-    if ComboSystem.isInFlow() then
-        Player.addStamina(0.017)
-    end
+    if ComboSystem.isInFlow() then Player.addStamina(0.017) end
 
-    -- ── Dibujar escena ──────────────────────────────────────
-    -- 1. Fondo (nivel actual → ciclo módulo 3)
-    if bgImg then
-        bgImg:draw(Layout.BG_X, Layout.BG_Y)
-    end
-
-    -- 2. Inodoro (agua + olas)
+    -- Dibujar
+    if bgImg then bgImg:draw(Layout.BG_X, Layout.BG_Y) end
     Toilet.draw()
-
-    -- 3. Personaje
     Player.draw()
-
-    -- 4. QTE (encima)
     QTEManager.draw()
 
-    -- ── Condiciones de victoria / derrota ───────────────────
     water = Toilet.getWaterLevel()
     if water <= 0 then
         ScoreManager.addLevelBonus(level, ComboSystem.getMaxCombo())
@@ -382,19 +401,21 @@ function GameManager._updateGameplay()
     end
 end
 
--- ── Nivel Completado (Versión 3.0 — sin rectángulo negro gigante) ──
+-- ─────────────────────────────────────────────────────────────
+-- ── NIVEL COMPLETADO — Versión 4.0 ───────────────────────────
+-- [FIX] No hay rect negro fantasma. Panel blanco → texto negro.
+-- [NEW] "Presiona [A] para volver" con sprite del botón A.
+-- ─────────────────────────────────────────────────────────────
 function GameManager._updateLevelClear()
     local gfx = playdate.graphics
     levelClearTimer -= 1
 
-    -- Fondo (nivel recién completado)
+    -- Fondo del nivel recién completado
     if bgImg then bgImg:draw(Layout.BG_X, Layout.BG_Y) end
-
-    -- Estado del juego de fondo
     Toilet.draw()
     Player.draw()
 
-    -- Animación de flush (siempre visible)
+    -- Animación de flush
     flushTimer += 1
     if flushTimer >= FLUSH_FRAME_DUR then
         flushTimer = 0
@@ -405,34 +426,45 @@ function GameManager._updateLevelClear()
         if img then img:draw(175, 85) end
     end
 
-    -- ── Panel estilizado centrado (blanco con bordes redondeados gruesos) ──
-    local pw, ph = 270, 120
+    -- ── Panel estilizado: negro exterior → blanco interior ───
+    local pw, ph = 270, 118
     local px = math.floor((400 - pw) / 2)
-    local py = math.floor((240 - ph) / 2) - 10
+    local py = math.floor((240 - ph) / 2) - 8
 
-    -- Sombra / borde exterior negro
+    -- Sombra exterior negra
     gfx.setColor(gfx.kColorBlack)
-    gfx.fillRoundRect(px - 3, py - 3, pw + 6, ph + 6, 14)
+    gfx.fillRoundRect(px - 4, py - 4, pw + 8, ph + 8, 15)
 
     -- Panel blanco principal
     gfx.setColor(gfx.kColorWhite)
     gfx.fillRoundRect(px, py, pw, ph, 12)
 
-    -- Borde interior negro (decorativo, grosor doble)
+    -- Bordes interiores decorativos (negros, doble)
     gfx.setColor(gfx.kColorBlack)
-    gfx.drawRoundRect(px + 2, py + 2, pw - 4, ph - 4, 10)
-    gfx.drawRoundRect(px + 4, py + 4, pw - 8, ph - 8, 8)
+    gfx.drawRoundRect(px + 2,  py + 2,  pw - 4,  ph - 4,  10)
+    gfx.drawRoundRect(px + 4,  py + 4,  pw - 8,  ph - 8,  8)
 
-    -- Texto en negro sobre blanco → perfectamente legible
-    gfx.drawTextAligned("★ NIVEL " .. (level - 1) .. " COMPLETADO ★", 200, py + 14, kTextAlignment.center)
+    -- [FIX] Todo el texto siguiente está en negro sobre panel blanco → siempre legible
+    gfx.setColor(gfx.kColorBlack)
+    gfx.drawTextAligned("★ NIVEL " .. (level - 1) .. " COMPLETADO ★", 200, py + 12, kTextAlignment.center)
 
-    gfx.drawLine(px + 20, py + 34, px + pw - 20, py + 34)
+    gfx.drawLine(px + 20, py + 30, px + pw - 20, py + 30)
 
-    gfx.drawTextAligned("Score:  " .. ScoreManager.getScore(), 200, py + 42, kTextAlignment.center)
-    gfx.drawTextAligned("Coins:  " .. ScoreManager.getCoins(), 200, py + 60, kTextAlignment.center)
+    gfx.drawTextAligned("Score:  " .. ScoreManager.getScore(), 200, py + 38, kTextAlignment.center)
+    gfx.drawTextAligned("Coins:  " .. ScoreManager.getCoins(), 200, py + 54, kTextAlignment.center)
 
     local countdown = math.ceil(levelClearTimer / 30)
-    gfx.drawTextAligned("Nivel " .. level .. " en " .. countdown .. "...", 200, py + 82, kTextAlignment.center)
+    gfx.drawTextAligned("Nivel " .. level .. " en " .. countdown .. "...", 200, py + 70, kTextAlignment.center)
+
+    -- [NEW] "Presiona [A]" con sprite del botón (si levelClearTimer es par → parpadea)
+    if (math.floor(levelClearTimer / 8) % 2) == 0 then
+        -- Texto izquierdo
+        gfx.drawText("Presiona", px + 30, py + 90)
+        if btnAImg then
+            btnAImg:draw(px + 100, py + 88)
+        end
+        gfx.drawText("para continuar", px + 128, py + 90)
+    end
 
     if levelClearTimer <= 0 then
         resetForLevel(level)
@@ -440,42 +472,66 @@ function GameManager._updateLevelClear()
     end
 end
 
--- ── Game Over ─────────────────────────────────────────────────
+-- ─────────────────────────────────────────────────────────────
+-- ── GAME OVER — Versión 4.0 ──────────────────────────────────
+-- [FIX] Eliminado el fillRect negro que impedía ver el panel.
+--       Ahora: fondo → overlay semitransparente → panel blanco → texto negro.
+-- [NEW] "Presiona [A] para volver a jugar" con sprite del botón A.
+-- ─────────────────────────────────────────────────────────────
 function GameManager._updateGameOver()
     local gfx = playdate.graphics
     gameoverFrame += 1
 
-    -- Fondo
+    -- [FIX] Fondo de muralla: visible, da contexto de "baño inundado"
     if bgImg then
         bgImg:draw(Layout.BG_X, Layout.BG_Y)
     end
 
-    -- Overlay negro completo
-    gfx.setColor(gfx.kColorBlack)
+    -- [FIX] Overlay DITHERED en lugar de fillRect negro completo.
+    -- El dithering semitransparente oscurece sin borrar el fondo ni crear el cuadro negro.
+    local DITHER_75 = { 0xBB, 0xEE, 0xBB, 0xEE, 0xBB, 0xEE, 0xBB, 0xEE }
+    gfx.setPattern(DITHER_75)
     gfx.fillRect(0, 0, 400, 240)
+    gfx.setColor(gfx.kColorBlack)  -- restaurar color sólido
 
-    -- Panel principal
-    local px, py, pw, ph = 60, 40, 280, 160
+    -- ── Panel principal: negro exterior → blanco interior ────
+    local px, py, pw, ph = 55, 32, 290, 176
     gfx.setColor(gfx.kColorBlack)
-    gfx.fillRoundRect(px, py, pw, ph, 10)
+    gfx.fillRoundRect(px, py, pw, ph, 12)
     gfx.setColor(gfx.kColorWhite)
-    gfx.drawRoundRect(px + 1, py + 1, pw - 2, ph - 2, 9)
-    gfx.drawRoundRect(px + 3, py + 3, pw - 6, ph - 6, 7)
+    gfx.fillRoundRect(px + 3, py + 3, pw - 6, ph - 6, 10)
 
+    -- Bordes decorativos interiores
+    gfx.setColor(gfx.kColorBlack)
+    gfx.drawRoundRect(px + 4,  py + 4,  pw - 8,  ph - 8,  9)
+    gfx.drawRoundRect(px + 6,  py + 6,  pw - 12, ph - 12, 7)
+
+    -- [FIX] Todo el texto en negro sobre panel blanco → siempre visible
+    gfx.setColor(gfx.kColorBlack)
     gfx.drawTextAligned("*GAME OVER*", 200, py + 14, kTextAlignment.center)
-    gfx.drawTextAligned("La facultad se inundo...", 200, py + 34, kTextAlignment.center)
+    gfx.drawTextAligned("La facultad se inundó...", 200, py + 32, kTextAlignment.center)
 
-    gfx.setColor(gfx.kColorWhite)
-    gfx.drawLine(80, py + 52, 320, py + 52)
+    gfx.drawLine(px + 20, py + 50, px + pw - 20, py + 50)
 
-    gfx.drawTextAligned("Score:           " .. ScoreManager.getScore(), 200, py + 62, kTextAlignment.center)
-    gfx.drawTextAligned("Diaz-Coins:      " .. ScoreManager.getCoins(), 200, py + 80, kTextAlignment.center)
-    gfx.drawTextAligned("Nivel alcanzado: " .. level, 200, py + 98, kTextAlignment.center)
+    gfx.drawTextAligned("Score:           " .. ScoreManager.getScore(), 200, py + 58, kTextAlignment.center)
+    gfx.drawTextAligned("Diaz-Coins:      " .. ScoreManager.getCoins(), 200, py + 76, kTextAlignment.center)
+    gfx.drawTextAligned("Nivel alcanzado: " .. level,                   200, py + 94, kTextAlignment.center)
 
-    -- Parpadeo "PRESS A"
+    gfx.drawLine(px + 20, py + 112, px + pw - 20, py + 112)
+
+    -- [NEW] "Presiona [A] para volver a jugar" — con sprite del botón A
+    -- Parpadeo cada 20 frames
     if (math.floor(gameoverFrame / 20) % 2) == 0 then
-        gfx.drawRoundRect(95, py + 122, 210, 20, 5)
-        gfx.drawTextAligned("[ Presiona A para reintentar ]", 200, py + 126, kTextAlignment.center)
+        -- Centrar la composición: "Presiona" + ícono A + "para volver"
+        local tyBase = py + 120
+        gfx.drawText("Presiona", px + 40, tyBase)
+        if btnAImg then
+            btnAImg:draw(px + 112, tyBase - 2)
+        else
+            gfx.drawRoundRect(px + 113, tyBase - 1, 18, 18, 3)
+            gfx.drawTextAligned("A", px + 122, tyBase + 1, kTextAlignment.center)
+        end
+        gfx.drawText("para volver a jugar", px + 138, tyBase)
     end
 
     if playdate.buttonJustPressed(playdate.kButtonA) then

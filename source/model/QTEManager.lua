@@ -1,7 +1,11 @@
 -- =============================================================
--- model/QTEManager.lua
--- Motor de Quick Time Events — Versión 2.0
--- Usa iconos gráficos de botón, globo de cómic, feedback visual rico
+-- model/QTEManager.lua  — Versión 3.0
+-- CAMBIOS v3.0:
+--   [NEW] Obstáculo aparece en el ESPACIO CENTRAL entre Díaz y el inodoro
+--         (no en el bowl ni sobre el inodoro)
+--   [NEW] Obstáculo dibujado dentro de un círculo blanco con borde negro
+--         para que resalte sobre cualquier fondo de muralla
+--   [FIX] Tamaño del sprite del obstáculo: 28×28 px (más grande)
 -- =============================================================
 
 QTEManager = {}
@@ -30,7 +34,6 @@ local BTN_IMAGE_NAMES = {
     [BTN_A]     = "ui_button_a",
 }
 
--- Fallback de símbolos de texto (si las imágenes no cargan)
 local BTN_SYMBOLS = {
     [BTN_UP]    = "^",
     [BTN_DOWN]  = "v",
@@ -40,16 +43,16 @@ local BTN_SYMBOLS = {
 }
 
 -- ── Estado interno ────────────────────────────────────────────
-local active        = false
-local currentObs    = nil
-local seqIndex      = 1
-local timeLimit     = 0
-local timeElapsed   = 0
-local spawnTimer    = 0
-local spawnInterval = 120
-local lastWrongFlash= 0   -- ms del último fallo (para efecto de fallo)
+local active         = false
+local currentObs     = nil
+local seqIndex       = 1
+local timeLimit      = 0
+local timeElapsed    = 0
+local spawnTimer     = 0
+local spawnInterval  = 120
+local lastWrongFlash = 0
 
--- ── Imágenes (cargadas lazy) ──────────────────────────────────
+-- ── Imágenes ─────────────────────────────────────────────────
 local obsImages = {}
 local btnImages = {}
 local coinImg   = nil
@@ -57,7 +60,6 @@ local coinImg   = nil
 -- ── Buffer anti-rebote ────────────────────────────────────────
 local prevButtons = {}
 
--- ── Carga de imágenes ────────────────────────────────────────
 local function loadImages()
     for _, def in ipairs(OBSTACLE_DEFS) do
         if not obsImages[def.img] then
@@ -74,7 +76,7 @@ local function loadImages()
     end
 end
 
--- ── Input con buffer ─────────────────────────────────────────
+-- ── Input ─────────────────────────────────────────────────────
 local function justPressed(btn)
     local now  = playdate.buttonIsPressed(btn)
     local prev = prevButtons[btn] or false
@@ -90,7 +92,7 @@ local function updatePrevButtons()
     prevButtons[BTN_A]     = playdate.buttonIsPressed(BTN_A)
 end
 
--- ── Spawn de obstáculo ────────────────────────────────────────
+-- ── Spawn ─────────────────────────────────────────────────────
 local function spawnObstacle(level)
     local available = {}
     for _, def in ipairs(OBSTACLE_DEFS) do
@@ -104,11 +106,11 @@ local function spawnObstacle(level)
     local timeFactor = math.max(0.55, 1.0 - (level * 0.04))
     local timeFrames = math.floor(pick.baseTime * timeFactor * 30)
 
-    currentObs   = pick
-    seqIndex     = 1
-    timeLimit    = timeFrames
-    timeElapsed  = 0
-    active       = true
+    currentObs  = pick
+    seqIndex    = 1
+    timeLimit   = timeFrames
+    timeElapsed = 0
+    active      = true
 end
 
 -- ── API pública ───────────────────────────────────────────────
@@ -122,7 +124,7 @@ function QTEManager.init(level)
     spawnTimer    = 0
     spawnInterval = math.max(50, 130 - level * 10)
     prevButtons   = {}
-    lastWrongFlash= 0
+    lastWrongFlash = 0
     loadImages()
 end
 
@@ -133,7 +135,7 @@ function QTEManager.cancel()
     currentObs = nil
 end
 
--- ── Actualización principal ───────────────────────────────────
+-- ── Actualización ─────────────────────────────────────────────
 function QTEManager.update(level)
     if not active then
         spawnTimer += 1
@@ -147,7 +149,6 @@ function QTEManager.update(level)
 
     timeElapsed += 1
 
-    -- Timeout
     if timeElapsed >= timeLimit then
         Toilet.addPenalty(currentObs.penalty)
         ComboSystem.resetCombo()
@@ -158,7 +159,6 @@ function QTEManager.update(level)
         return
     end
 
-    -- Leer input
     local seq      = currentObs.seq
     local expected = seq[seqIndex]
     local pressed  = nil
@@ -173,7 +173,6 @@ function QTEManager.update(level)
         if pressed == expected then
             seqIndex += 1
             if seqIndex > #seq then
-                -- ¡Secuencia completa!
                 local timeRemaining = timeLimit - timeElapsed
                 local speedBonus    = math.max(1.0, (timeRemaining / timeLimit) * 2.0)
                 ScoreManager.addQTEScore(currentObs.penalty * 10, ComboSystem.getCombo(), speedBonus)
@@ -182,7 +181,6 @@ function QTEManager.update(level)
                 currentObs = nil
             end
         else
-            -- Incorrecto
             Toilet.addPenalty(currentObs.penalty)
             ComboSystem.resetCombo()
             lastWrongFlash = playdate.getCurrentTimeMilliseconds()
@@ -194,14 +192,15 @@ function QTEManager.update(level)
     updatePrevButtons()
 end
 
--- ── Dibujo del QTE ───────────────────────────────────────────
+-- ─────────────────────────────────────────────────────────────
+-- ── DIBUJO DEL QTE — Versión 3.0 ─────────────────────────────
+-- ─────────────────────────────────────────────────────────────
 function QTEManager.draw()
     local gfx = playdate.graphics
     local ms  = playdate.getCurrentTimeMilliseconds()
 
-    -- ── Efecto de fallo (pantalla completa parpadea brevemente) ──
+    -- ── Flash de fallo ────────────────────────────────────────
     if ms - lastWrongFlash < 200 then
-        -- Flash blanco sobre el panel QTE como feedback negativo
         gfx.setColor(gfx.kColorBlack)
         gfx.fillRect(0, Layout.QTE_PANEL_Y - 4, 400, Layout.QTE_PANEL_H + 8)
         gfx.setColor(gfx.kColorWhite)
@@ -211,57 +210,72 @@ function QTEManager.draw()
 
     if not active or currentObs == nil then return end
 
-    -- ── Obstáculo flotando SOBRE la taza (no dentro del agua) ──
-    local bx, by, bw, bh = Toilet.getBowlBounds()
+    -- ── [NEW] Obstáculo en el espacio central entre Díaz y el inodoro ──
+    -- Díaz termina aprox en X = Layout.PLAYER_X + 120 = 150
+    -- Inodoro empieza en X = Layout.TOILET_X = 225
+    -- Centro del espacio: X = (150 + 225) / 2 = 187, Y central de la escena ≈ 120
+    --
+    -- El obstáculo flota verticalmente con math.sin en ese punto central,
+    -- NO en el bowl del inodoro.
     local obsImg = obsImages[currentObs.img]
     if obsImg then
-        -- Flotando justo encima del borde superior del bowl
-        local floatOffset = math.floor(math.sin(ms / 350) * 4)
-        -- obsX centrado horizontalmente sobre el bowl
-        local obsX = bx + math.floor(bw / 2) - 12
-        -- obsY: por encima del borde superior del bowl (-28px) más animación
-        local obsY = by - 28 + floatOffset
+        -- [NEW] Usa Layout.OBS_CENTER_X/Y: espacio central entre Díaz y el inodoro
+        local midX     = Layout.OBS_CENTER_X
+        local midY     = Layout.OBS_CENTER_Y
+        local OBS_SIZE = 36   -- tamaño del sprite (ahora 36×36 px)
+        local CIRCLE_R = 22   -- radio del círculo de fondo
+
+        -- Animación flotante vertical (suave con sin)
+        local floatY = midY + math.floor(math.sin(ms / 400) * 8)
+        local obsX   = midX - math.floor(OBS_SIZE / 2)
+        local obsY   = floatY - math.floor(OBS_SIZE / 2)
+
+        -- [NEW] Círculo blanco de fondo (el obstáculo NO tiene fondo cuadrado)
+        gfx.setColor(gfx.kColorWhite)
+        gfx.fillCircleAtPoint(midX, floatY, CIRCLE_R)
+        -- Borde negro doble = apariencia "gordita"
+        gfx.setColor(gfx.kColorBlack)
+        gfx.drawCircleAtPoint(midX, floatY, CIRCLE_R)
+        gfx.drawCircleAtPoint(midX, floatY, CIRCLE_R - 1)
+
+        -- Sprite del obstáculo centrado dentro del círculo
         obsImg:draw(obsX, obsY)
     end
 
-    -- ── Barra de tiempo (encima del panel QTE) ────────────────
-    local timerFrac = 1.0 - (timeElapsed / timeLimit)
-    local barFullW  = Layout.QTE_PANEL_W
-    local barFilledW= math.floor(barFullW * timerFrac)
-    local barX      = Layout.QTE_PANEL_X
-    local barY      = Layout.QTE_TIMER_Y
+    -- ── Barra de tiempo (encima del panel QTE inferior) ───────
+    local timerFrac  = 1.0 - (timeElapsed / timeLimit)
+    local barFullW   = Layout.QTE_PANEL_W
+    local barFilledW = math.floor(barFullW * timerFrac)
+    local barX       = Layout.QTE_PANEL_X
+    local barY       = Layout.QTE_TIMER_Y
 
-    -- Fondo de la barra
     gfx.setColor(gfx.kColorBlack)
     gfx.fillRect(barX, barY, barFullW, 4)
-    -- Relleno de tiempo restante (blanco retrocede desde la derecha)
     gfx.setColor(gfx.kColorWhite)
     gfx.fillRect(barX + barFilledW, barY, barFullW - barFilledW, 4)
-    -- Borde
     gfx.setColor(gfx.kColorBlack)
     gfx.drawRect(barX, barY, barFullW, 4)
 
-    -- ── Globo de cómic (panel de botones) ─────────────────────
+    -- ── Panel globo de botones ────────────────────────────────
     local px = Layout.QTE_PANEL_X
     local py = Layout.QTE_PANEL_Y
     local pw = Layout.QTE_PANEL_W
     local ph = Layout.QTE_PANEL_H
 
-    -- Fondo del panel (blanco con borde redondeado)
     gfx.setColor(gfx.kColorWhite)
     gfx.fillRoundRect(px, py, pw, ph, 6)
     gfx.setColor(gfx.kColorBlack)
     gfx.drawRoundRect(px, py, pw, ph, 6)
 
-    -- Nombre del obstáculo a la izquierda dentro del panel
+    -- Nombre del obstáculo
+    gfx.setColor(gfx.kColorBlack)
     gfx.drawText(string.upper(currentObs.name), px + 6, py + 13)
 
-    -- ── Botones de la secuencia ───────────────────────────────
+    -- ── Iconos de botón en la secuencia ──────────────────────
     local seq    = currentObs.seq
-    local ICON_W = 26    -- ancho de cada slot de botón (incluye margen)
+    local ICON_W = 26
     local ICON_H = 24
     local totalW = #seq * ICON_W
-    -- Centrar la fila de botones en el panel (restando espacio del nombre ~55px)
     local startX = px + pw - totalW - 8
     local iconY  = py + math.floor((ph - ICON_H) / 2)
 
@@ -269,19 +283,18 @@ function QTEManager.draw()
         local ix = startX + (i - 1) * ICON_W
 
         if i < seqIndex then
-            -- ✓ Completado: fondo negro, check blanco
+            -- Completado
             gfx.setColor(gfx.kColorBlack)
             gfx.fillRoundRect(ix, iconY, ICON_H, ICON_H, 4)
             gfx.setColor(gfx.kColorWhite)
             gfx.drawTextAligned("OK", ix + 12, iconY + 6, kTextAlignment.center)
 
         elseif i == seqIndex then
-            -- ► Actual: icono parpadeando (invertir colores cada 4 frames)
-            local blink = (math.floor(ms / 133) % 2) == 0  -- ~4 frames a 30fps
+            -- Actual: parpadeo
+            local blink = (math.floor(ms / 133) % 2) == 0
             local img   = btnImages[btn]
 
             if blink then
-                -- Fondo negro, dibujar icono en modo "relleno blanco" (colores invertidos)
                 gfx.setColor(gfx.kColorBlack)
                 gfx.fillRoundRect(ix - 1, iconY - 1, ICON_H + 2, ICON_H + 2, 4)
                 if img then
@@ -293,7 +306,6 @@ function QTEManager.draw()
                     gfx.drawTextAligned(BTN_SYMBOLS[btn] or "?", ix + 12, iconY + 6, kTextAlignment.center)
                 end
             else
-                -- Normal: fondo blanco, icono negro con borde doble para destacar
                 gfx.setColor(gfx.kColorBlack)
                 gfx.drawRoundRect(ix - 2, iconY - 2, ICON_H + 4, ICON_H + 4, 5)
                 gfx.setColor(gfx.kColorWhite)
@@ -307,12 +319,11 @@ function QTEManager.draw()
             end
 
         else
-            -- ○ Pendiente: solo icono a baja opacidad (dithering 50%)
+            -- Pendiente
             gfx.setColor(gfx.kColorBlack)
             gfx.drawRoundRect(ix, iconY, ICON_H, ICON_H, 3)
             local img = btnImages[btn]
             if img then
-                -- Dibujar en modo dithering para que parezca "apagado"
                 gfx.setImageDrawMode(gfx.kDrawModeNXOR)
                 img:draw(ix, iconY)
                 gfx.setImageDrawMode(gfx.kDrawModeCopy)
