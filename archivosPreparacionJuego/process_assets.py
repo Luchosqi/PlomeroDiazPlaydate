@@ -1,22 +1,26 @@
 #!/usr/bin/env python3
 """
-process_assets.py  —  Versión 4.1
+process_assets.py  —  Versión 4.2
 Convierte imágenes generadas por IA al formato 1-bit compatible con Playdate.
 
 ═══════════════════════════════════════════════════════════════════════════════
+CAMBIOS v4.2  (sobre v4.1)
+───────────────────────────────────────────────────────────────────────────────
+[NEW] Ícono de biblioteca (card.png):
+      • Fuente: source/assets/images/IconoJuego32x32/iconoJuego.png (1254×1254)
+      • Destino: source/assets/images/card.png  (32×32, sin dithering)
+      • Se usa ICON_PATH + process_sprite_from_path() con dither=False
+        para que los trazos queden sólidos y nítidos a ese tamaño mínimo.
+      • pdxinfo actualizado: imagePath=assets/images/card
+
 CAMBIOS v4.1  (sobre v4.0)
 ───────────────────────────────────────────────────────────────────────────────
 [NEW] Soporte para fondos desde DOS fuentes distintas:
       • ARTIFACT_DIR  → fondo original  (bg_bathroom_1)
       • GAME_ASSETS   → fondo2.png      (bg_bathroom_2)
                         fondo3.png      (bg_bathroom_3)
-      Se usa la nueva función process_sprite_from_path() que acepta una ruta
-      absoluta directa en lugar de un glob sobre ARTIFACT_DIR.
 
-[FIX] Inodoro (toilet.png): se le aplica add_outline() con thickness=3
-      (igual al personaje Díaz). Esto genera una silueta blanca sólida detrás
-      de los trazos negros para que el WC destaque sobre fondos dithered.
-      Antes tenía outline=2; ahora es outline=3 y se documenta explícitamente.
+[FIX] Inodoro (toilet.png): outline 2 → 3 px para igualar visibilidad con Díaz.
 
 Sin cambios en tipografías ni fuentes.
 ═══════════════════════════════════════════════════════════════════════════════
@@ -58,6 +62,10 @@ GAME_ASSETS  = "/home/luchosqi/Documentos/Universidad/semestres/Semestre 5/PRACT
 # Si en el futuro los mueves a ARTIFACT_DIR, cambia estas rutas o usa find_source().
 FONDO2_PATH = os.path.join(GAME_ASSETS, "fondo2.png")   # → bg_bathroom_2.png
 FONDO3_PATH = os.path.join(GAME_ASSETS, "fondo3.png")   # → bg_bathroom_3.png
+
+# [v4.2 NEW] Ícono de biblioteca — ruta exacta donde el usuario lo colocó.
+# El archivo fuente puede ser de cualquier tamaño; se escala a 32×32 sin dithering.
+ICON_PATH   = os.path.join(GAME_ASSETS, "IconoJuego32x32", "iconoJuego.png")
 
 # ── Tabla de sprites ──────────────────────────────────────────────────────────
 # Columnas: (glob_pattern, target_name, width, height, use_dither, threshold, transparent_bg, outline_px)
@@ -108,15 +116,20 @@ SPRITES = [
     ("ui_water_drop_*.png",    "ui_water_drop.png",        16,  16, False, 100, False, 0),
 ]
 
-# ── [v4.1 NEW] Fondos desde ruta absoluta (fondo2/fondo3 en GAME_ASSETS) ─────
+# ── [v4.1/4.2] Assets desde ruta absoluta directa ───────────────────────────
 # Formato: (ruta_absoluta_fuente, target_name, width, height, use_dither, threshold)
 # Se procesan con process_sprite_from_path() en lugar de process_sprite().
 EXTRA_BACKGROUNDS = [
     # [v4.1] fondo2.png → bg_bathroom_2.png  (el usuario lo colocó en GAME_ASSETS)
-    (FONDO2_PATH, "bg_bathroom_2.png", 400, 240, True, 130),
+    (FONDO2_PATH, "bg_bathroom_2.png", 400, 240, True,  130),
 
     # [v4.1] fondo3.png → bg_bathroom_3.png  (el usuario lo colocó en GAME_ASSETS)
-    (FONDO3_PATH, "bg_bathroom_3.png", 400, 240, True, 130),
+    (FONDO3_PATH, "bg_bathroom_3.png", 400, 240, True,  130),
+
+    # [v4.2 NEW] iconoJuego.png → card.png  (ícono 32×32 en la biblioteca Playdate)
+    # dither=False: a 32×32 el dithering destruye los detalles; umbral fijo mejor.
+    # threshold=128: punto medio estándar — pixeles < 128 = negro, >= 128 = blanco.
+    (ICON_PATH,   "card.png",          32,  32, False, 128),
 ]
 
 # Rotaciones para la animación de flush
