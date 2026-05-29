@@ -15,6 +15,7 @@ import "model/ScoreManager"
 import "model/Player"
 import "model/Toilet"
 import "model/QTEManager"
+import "model/AudioManager"
 import "model/GameManager"
 import "view/HUD"
 local gfx <const> = playdate.graphics
