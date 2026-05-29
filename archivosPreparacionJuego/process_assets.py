@@ -1,74 +1,35 @@
 #!/usr/bin/env python3
 """
-process_assets.py  —  Versión 4.0
+process_assets.py  —  Versión 4.1
 Convierte imágenes generadas por IA al formato 1-bit compatible con Playdate.
 
 ═══════════════════════════════════════════════════════════════════════════════
-CAMBIOS v4.0
+CAMBIOS v4.1  (sobre v4.0)
 ───────────────────────────────────────────────────────────────────────────────
-[NEW] add_outline(): aplica un "contorno grueso" blanco alrededor del personaje
-      para que resalte siempre sobre el fondo dithered. Thickness = 3 px.
+[NEW] Soporte para fondos desde DOS fuentes distintas:
+      • ARTIFACT_DIR  → fondo original  (bg_bathroom_1)
+      • GAME_ASSETS   → fondo2.png      (bg_bathroom_2)
+                        fondo3.png      (bg_bathroom_3)
+      Se usa la nueva función process_sprite_from_path() que acepta una ruta
+      absoluta directa en lugar de un glob sobre ARTIFACT_DIR.
 
-[NEW] 3 fondos DISTINTOS (bg_bathroom_1/2/3.png) con instrucciones de diseño
-      diferenciadas en los comentarios.
+[FIX] Inodoro (toilet.png): se le aplica add_outline() con thickness=3
+      (igual al personaje Díaz). Esto genera una silueta blanca sólida detrás
+      de los trazos negros para que el WC destaque sobre fondos dithered.
+      Antes tenía outline=2; ahora es outline=3 y se documenta explícitamente.
 
-[NEW] Obstáculos más grandes: de 28×28 → 36×36 px.
-      El círculo blanco de fondo se dibuja en Lua (no en Python).
-
-[FIX] Los sprites del personaje se exportan en RGBA (transparencia real)
-      y además se les aplica el outline blanco de 3 px.
-
-[FIX] Inodoro también con outline para que resalte del fondo.
+Sin cambios en tipografías ni fuentes.
 ═══════════════════════════════════════════════════════════════════════════════
 
 INSTRUCCIONES DE GENERACIÓN DE IMÁGENES (para la IA generadora)
 ───────────────────────────────────────────────────────────────────────────────
 
-1. PERSONAJE "DIAZ" (diaz_idle, diaz_work_1/2/3, diaz_calistenia, diaz_lose)
-   Prompt base:
-   "1-bit pixel art, 120×150 pixels, stark black and white, NO grey.
-    Slim young professor, white button-up shirt with rolled sleeves, dark jeans,
-    short dark hair, red plunger tool. THICK WHITE OUTLINE (3 px) surrounding the
-    entire character, so he stands out against any dithered background.
-    Transparent background."
-   Notas: el outline se puede agregar en Python con add_outline().
-
-2. FONDOS DISTINTOS (un prompt por fondo):
-
-   bg_bathroom_1.png — PARED DE LADRILLOS (nivel 1, 4, 7...)
-   "400×240 pixel art, 1-bit black and white dithered texture.
-    Old university bathroom brick wall, horizontal brick pattern with mortar lines.
-    Subtle crack details. Dithered grey tones to simulate depth. No color."
-
-   bg_bathroom_2.png — AZULEJOS UNIVERSITARIOS (nivel 2, 5, 8...)
-   "400×240 pixel art, 1-bit black and white dithered texture.
-    Classic square bathroom tiles 32×32 px, visible grout lines.
-    Some tiles have university graffiti or water stains. Checkerboard-like pattern.
-    Dithered grey to simulate dirty porcelain. No color."
-
-   bg_bathroom_3.png — PARED CON GRAFITIS (nivel 3, 6, 9...)
-   "400×240 pixel art, 1-bit black and white dithered texture.
-    Rough concrete university bathroom wall covered with marker and spray-paint
-    graffiti: equations, doodles, text bubbles. Heavy cross-hatching for the
-    dark areas. Dense dithering. No color."
-
-3. OBSTÁCULOS (obs_normal, obs_pelo, obs_banana, obs_car_red)
-   Ahora son 36×36 px. El círculo blanco de fondo se dibuja en Lua.
-   Prompt base:
-   "1-bit pixel art icon, 36×36 pixels, high contrast black on transparent.
-    NO square background (the Lua code adds a white circle).
-    <descripción del obstáculo específico>. Bold black outlines."
-
-   obs_normal  = "a cartoonish brown poop emoji shape"
-   obs_pelo    = "a tangle of long hair strands"
-   obs_banana  = "a curved banana shape"
-   obs_car_red = "a small red car from the side (1-bit, all black)"
-
-4. INODORO (toilet.png)
-   "1-bit pixel art toilet, side view, 110×145 px, bold black outlines,
-    3-pixel WHITE OUTLINE surrounding the entire toilet shape so it stands
-    out against dithered backgrounds. Transparent background."
-
+1. PERSONAJE "DIAZ" → RGBA transparente + outline blanco 3 px (add_outline)
+2. INODORO          → RGBA transparente + outline blanco 3 px (add_outline)  ← FIX v4.1
+3. bg_bathroom_1    → fondo original desde ARTIFACT_DIR (ladrillos)
+   bg_bathroom_2    → fondo2.png desde GAME_ASSETS  (azulejos)               ← NEW v4.1
+   bg_bathroom_3    → fondo3.png desde GAME_ASSETS  (grafitis)               ← NEW v4.1
+4. Obstáculos       → L 36×36 opaco (el círculo de contraste lo dibuja Lua)
 ═══════════════════════════════════════════════════════════════════════════════
 
 Uso:
@@ -83,16 +44,27 @@ import os
 import glob
 from PIL import Image, ImageFilter
 
-# ── Rutas ────────────────────────────────────────────────────────────────────
+# ── Rutas base ───────────────────────────────────────────────────────────────
+# ARTIFACT_DIR: donde la IA guarda sus imágenes generadas (fuente principal)
 ARTIFACT_DIR = "/home/luchosqi/.gemini/antigravity/brain/bf7b4f31-1cdb-4669-ad27-092621339f70"
+
+# GAME_ASSETS: destino final de todos los sprites procesados
+# [v4.1] También se usa como FUENTE para fondo2.png y fondo3.png que el usuario
+#         colocó directamente aquí en lugar de en ARTIFACT_DIR.
 GAME_ASSETS  = "/home/luchosqi/Documentos/Universidad/semestres/Semestre 5/PRACTICA 1/PlomeroDiaz/source/assets/images"
+
+# ── Rutas directas para los fondos nuevos ────────────────────────────────────
+# [v4.1 NEW] fondo2.png y fondo3.png están en GAME_ASSETS (el usuario los colocó ahí).
+# Si en el futuro los mueves a ARTIFACT_DIR, cambia estas rutas o usa find_source().
+FONDO2_PATH = os.path.join(GAME_ASSETS, "fondo2.png")   # → bg_bathroom_2.png
+FONDO3_PATH = os.path.join(GAME_ASSETS, "fondo3.png")   # → bg_bathroom_3.png
 
 # ── Tabla de sprites ──────────────────────────────────────────────────────────
 # Columnas: (glob_pattern, target_name, width, height, use_dither, threshold, transparent_bg, outline_px)
-#   transparent_bg=True  → exporta RGBA (canal alfa)
-#   transparent_bg=False → exporta L 8-bit opaco
-#   outline_px > 0       → agrega un outline BLANCO de N píxeles alrededor de los trazos negros
-#                          (solo tiene efecto cuando transparent_bg=True)
+#   glob_pattern    → se busca en ARTIFACT_DIR con glob
+#   transparent_bg  → True = exporta RGBA (canal alfa real)
+#                     False = exporta L 8-bit opaco
+#   outline_px > 0  → agrega outline BLANCO N px (solo cuando transparent_bg=True)
 SPRITES = [
     # ── Personaje Díaz — RGBA transparente + outline blanco 3 px ─────────────
     ("diaz_idle_*.png",        "diaz_idle.png",           120, 150, True,  128, True,  3),
@@ -102,21 +74,21 @@ SPRITES = [
     ("diaz_calistenia_*.png",  "diaz_calistenia.png",     120, 150, True,  128, True,  3),
     ("diaz_lose_*.png",        "diaz_lose.png",           120, 150, True,  128, True,  3),
 
-    # ── Inodoro — RGBA transparente + outline blanco 2 px ────────────────────
-    ("toilet_*.png",           "toilet.png",              110, 145, True,  128, True,  2),
+    # ── Inodoro — RGBA transparente + outline blanco 3 px ────────────────────
+    # [v4.1 FIX] outline subido de 2 → 3 px para igualar la silueta del personaje
+    #            y garantizar visibilidad sobre cualquier fondo dithered de muralla.
+    ("toilet_*.png",           "toilet.png",              110, 145, True,  128, True,  3),
 
-    # ── Fondos DISTINTOS × 3 (opacos, llenan toda la pantalla) ───────────────
-    # IMPORTANTE: si tienes 3 imágenes distintas en ARTIFACT_DIR,
-    # renómbralas: bg_bathroom_1_*.png, bg_bathroom_2_*.png, bg_bathroom_3_*.png
-    # Si solo tienes una (bg_bathroom_*.png), los 3 fondos se generan desde la misma
-    # con umbrales distintos como diferenciación temporal hasta tener los 3 diseños.
-    ("bg_bathroom_1_*.png",    "bg_bathroom_1.png",       400, 240, True,  130, False, 0),
-    ("bg_bathroom_2_*.png",    "bg_bathroom_2.png",       400, 240, True,  145, False, 0),
-    ("bg_bathroom_3_*.png",    "bg_bathroom_3.png",       400, 240, True,  115, False, 0),
-    # Genérico (fallback por si algún módulo lo llama)
+    # ── Fondo #1 — desde ARTIFACT_DIR (original, ladrillos/baño genérico) ────
+    # [v4.1] Este sigue usando el glob estándar sobre ARTIFACT_DIR.
+    ("bg_bathroom_*.png",      "bg_bathroom_1.png",       400, 240, True,  130, False, 0),
+    # También exportar el genérico por retrocompatibilidad con módulos Lua existentes
     ("bg_bathroom_*.png",      "bg_bathroom.png",         400, 240, True,  130, False, 0),
 
-    # ── Obstáculos — opacos, 36×36 px (más grandes que antes) ───────────────
+    # NOTA: bg_bathroom_2 y bg_bathroom_3 se procesan por separado más abajo
+    # mediante EXTRA_BACKGROUNDS, usando rutas absolutas directas a GAME_ASSETS.
+
+    # ── Obstáculos — opacos, 36×36 px ────────────────────────────────────────
     ("obs_normal_*.png",       "obs_normal.png",           36,  36, False, 110, False, 0),
     ("obs_pelo_*.png",         "obs_pelo.png",             36,  36, False, 100, False, 0),
     ("obs_banana_*.png",       "obs_banana.png",           36,  36, False, 110, False, 0),
@@ -134,6 +106,17 @@ SPRITES = [
 
     # ── HUD ───────────────────────────────────────────────────────────────────
     ("ui_water_drop_*.png",    "ui_water_drop.png",        16,  16, False, 100, False, 0),
+]
+
+# ── [v4.1 NEW] Fondos desde ruta absoluta (fondo2/fondo3 en GAME_ASSETS) ─────
+# Formato: (ruta_absoluta_fuente, target_name, width, height, use_dither, threshold)
+# Se procesan con process_sprite_from_path() en lugar de process_sprite().
+EXTRA_BACKGROUNDS = [
+    # [v4.1] fondo2.png → bg_bathroom_2.png  (el usuario lo colocó en GAME_ASSETS)
+    (FONDO2_PATH, "bg_bathroom_2.png", 400, 240, True, 130),
+
+    # [v4.1] fondo3.png → bg_bathroom_3.png  (el usuario lo colocó en GAME_ASSETS)
+    (FONDO3_PATH, "bg_bathroom_3.png", 400, 240, True, 130),
 ]
 
 # Rotaciones para la animación de flush
@@ -163,15 +146,15 @@ COMPOSITE_CROPS = [
     ]),
 ]
 
-# ── Funciones ─────────────────────────────────────────────────────────────────
+# ── Funciones de utilidad ─────────────────────────────────────────────────────
 
 def find_source(pattern):
-    """Encuentra el archivo más reciente que coincida con el patrón glob."""
+    """Busca el archivo más reciente que coincida con el patrón en ARTIFACT_DIR."""
     matches = sorted(glob.glob(os.path.join(ARTIFACT_DIR, pattern)))
     return matches[-1] if matches else None
 
 def prepare_image_rgb(img):
-    """Normaliza a RGB con fondo blanco."""
+    """Normaliza cualquier modo de imagen a RGB con fondo blanco."""
     if img.mode in ('RGBA', 'LA'):
         bg = Image.new("RGBA", img.size, (255, 255, 255, 255))
         bg.paste(img, mask=img.split()[-1])
@@ -186,21 +169,22 @@ def prepare_image_rgb(img):
     return img
 
 def to_1bit_opaque(img_rgb, width, height, use_dither, threshold, rotation=0):
-    """Convierte a 1-bit modo L (opaco, compatible con Playdate imagetables)."""
+    """Convierte a 1-bit modo L opaco (compatible con Playdate imagetables)."""
     if rotation != 0:
         img_rgb = img_rgb.rotate(rotation, expand=False, fillcolor=(255, 255, 255))
     img_rgb = img_rgb.resize((width, height), Image.Resampling.LANCZOS)
     gray    = img_rgb.convert('L')
     if use_dither:
-        bw = gray.convert('1')
+        bw = gray.convert('1')          # Floyd-Steinberg automático
     else:
         bw = gray.point(lambda x: 255 if x > threshold else 0, '1')
-    return bw.convert('L')
+    return bw.convert('L')             # 8-bit (0 ó 255) compatible con pdc
 
 def to_rgba_transparent(img_src, width, height, use_dither, threshold, rotation=0):
     """
-    Convierte a RGBA: trazos negros opacos, fondo blanco transparente.
-    Playdate usa el canal alfa del PNG como máscara de dibujo.
+    Convierte a RGBA: trazos negros = opacos (alpha=255),
+    fondo blanco = transparente (alpha=0).
+    Playdate usa el canal alfa del PNG como máscara de recorte del sprite.
     """
     if rotation != 0:
         img_src = img_src.rotate(rotation, expand=False, fillcolor=(255, 255, 255))
@@ -212,89 +196,110 @@ def to_rgba_transparent(img_src, width, height, use_dither, threshold, rotation=
     else:
         bw = gray.point(lambda x: 0 if x <= threshold else 255, 'L')
 
-    # Construir canal alfa: negro=255 (opaco), blanco=0 (transparente)
-    rgba       = Image.new('RGBA', bw.size, (255, 255, 255, 0))
-    pix_bw     = bw.load()
-    pix_rgba   = rgba.load()
-    w, h = bw.size
+    rgba     = Image.new('RGBA', bw.size, (255, 255, 255, 0))
+    pix_bw   = bw.load()
+    pix_rgba = rgba.load()
+    w, h     = bw.size
     for y in range(h):
         for x in range(w):
             if pix_bw[x, y] < 128:
-                pix_rgba[x, y] = (0, 0, 0, 255)   # trazo negro opaco
+                pix_rgba[x, y] = (0, 0, 0, 255)         # trazo negro opaco
             else:
-                pix_rgba[x, y] = (255, 255, 255, 0)  # fondo transparente
+                pix_rgba[x, y] = (255, 255, 255, 0)     # fondo transparente
     return rgba
 
 def add_outline(rgba_img, thickness=3):
     """
-    [NEW v4.0] Agrega un outline BLANCO de N píxeles alrededor de los trazos negros
-    en una imagen RGBA. Técnica: dilatar el canal alfa, luego colorear de blanco
-    los píxeles nuevos (los que no eran parte del sprite original).
+    Agrega un outline BLANCO de N píxeles alrededor de los trazos negros.
+    Técnica: dilatar el canal alfa → los píxeles nuevos se pintan de blanco opaco.
+    Los trazos negros originales permanecen intactos sobre el outline.
 
-    Algoritmo:
-      1. Extraer canal alfa original (255 = trazo).
-      2. Dilatar ese canal N veces usando MaxFilter.
-      3. Los píxeles que pasaron de 0→255 en la dilatación son el outline.
-      4. Pintar esos píxeles de blanco opaco.
-      5. Dejar los píxeles originales negros intactos encima.
+    Uso: personaje Díaz (3px) e inodoro (3px) para visibilidad sobre fondos dithered.
     """
-    # Canal alfa original
-    alpha_orig = rgba_img.split()[3]
-
-    # Dilatar el canal alfa para expandir el outline
+    alpha_orig    = rgba_img.split()[3]
     alpha_dilated = alpha_orig
     for _ in range(thickness):
         alpha_dilated = alpha_dilated.filter(ImageFilter.MaxFilter(3))
 
-    # Pixels del outline = dilatados pero NO originales
-    orig_pixels     = alpha_orig.load()
-    dilated_pixels  = alpha_dilated.load()
-    result          = rgba_img.copy()
-    result_pixels   = result.load()
-    w, h = rgba_img.size
+    orig_pixels    = alpha_orig.load()
+    dilated_pixels = alpha_dilated.load()
+    result         = rgba_img.copy()
+    result_pixels  = result.load()
+    w, h           = rgba_img.size
 
     for y in range(h):
         for x in range(w):
+            # Píxel nuevo (parte del outline, NO del trazo original)
             if dilated_pixels[x, y] > 128 and orig_pixels[x, y] < 128:
-                # Outline: blanco opaco
-                result_pixels[x, y] = (255, 255, 255, 255)
-
+                result_pixels[x, y] = (255, 255, 255, 255)   # blanco opaco
     return result
 
 def save_result(result_img, target_name):
-    """Guarda la imagen en el directorio de assets del juego."""
+    """Guarda la imagen procesada en GAME_ASSETS."""
     target_path = os.path.join(GAME_ASSETS, target_name)
     os.makedirs(os.path.dirname(target_path), exist_ok=True)
     result_img.save(target_path, 'PNG')
 
+# ── Procesadores principales ──────────────────────────────────────────────────
+
 def process_sprite(pattern, target_name, width, height, use_dither, threshold,
                    transparent_bg=False, outline_px=0):
-    """Procesa un sprite simple (sin recorte)."""
+    """
+    Procesa un sprite buscando su fuente en ARTIFACT_DIR via glob.
+    Función estándar para la mayoría de los assets.
+    """
     source_path = find_source(pattern)
     if source_path is None:
-        print(f"  ⚠️  No encontrado: {pattern}")
+        print(f"  ⚠️  No encontrado en ARTIFACT_DIR: {pattern}")
         return False
+    return _process_from_path(source_path, target_name, width, height,
+                               use_dither, threshold, transparent_bg, outline_px)
+
+def process_sprite_from_path(source_path, target_name, width, height,
+                              use_dither, threshold):
+    """
+    [v4.1 NEW] Procesa un sprite desde una ruta absoluta directa.
+    Se usa para fondo2.png y fondo3.png que están en GAME_ASSETS
+    (en lugar de ARTIFACT_DIR).
+    Los fondos son siempre opacos (transparent_bg=False, outline_px=0).
+    """
+    if not os.path.exists(source_path):
+        print(f"  ⚠️  Archivo no encontrado: {source_path}")
+        return False
+    return _process_from_path(source_path, target_name, width, height,
+                               use_dither, threshold,
+                               transparent_bg=False, outline_px=0)
+
+def _process_from_path(source_path, target_name, width, height,
+                        use_dither, threshold, transparent_bg, outline_px):
+    """
+    Lógica de procesamiento compartida entre process_sprite() y
+    process_sprite_from_path(). Acepta la ruta absoluta de la fuente.
+    """
     try:
         img_raw  = Image.open(source_path)
         rotation = FLUSH_ROTATIONS.get(target_name, 0)
 
         if transparent_bg:
+            # Exportar como RGBA con fondo transparente
             img_rgb = img_raw.convert('RGB')
             result  = to_rgba_transparent(img_rgb, width, height, use_dither, threshold, rotation)
-            # [NEW] Aplicar outline blanco si se pide
+            # Aplicar outline blanco si se solicita (personaje e inodoro)
             if outline_px > 0:
                 result = add_outline(result, thickness=outline_px)
             label = f"RGBA {width}×{height}" + (f" + outline {outline_px}px" if outline_px > 0 else "")
         else:
+            # Exportar como L 8-bit opaco (fondos, obstáculos, etc.)
             img_rgb = prepare_image_rgb(img_raw)
             result  = to_1bit_opaque(img_rgb, width, height, use_dither, threshold, rotation)
-            label   = f"L {width}×{height}"
+            label   = f"L 1-bit {width}×{height}"
 
         save_result(result, target_name)
-        print(f"  ✅ {os.path.basename(source_path):42s} → {target_name} ({label})")
+        src_label = os.path.basename(source_path)
+        print(f"  ✅ {src_label:44s} → {target_name} ({label})")
         return True
     except Exception as e:
-        print(f"  ❌ Error en {pattern}: {e}")
+        print(f"  ❌ Error procesando {os.path.basename(source_path)}: {e}")
         return False
 
 def process_composite(pattern, crops):
@@ -303,7 +308,6 @@ def process_composite(pattern, crops):
     if source_path is None:
         print(f"  ⚠️  Compuesto no encontrado: {pattern}")
         return 0, len(crops)
-
     try:
         img_raw = Image.open(source_path)
     except Exception as e:
@@ -313,7 +317,7 @@ def process_composite(pattern, crops):
     ok = 0
     fail = 0
     for entry in crops:
-        # Soportar tupla 6 u 8 elementos
+        # Soportar tupla de 6, 7 u 8 elementos
         if len(entry) == 8:
             target_name, crop_box, w, h, dither, thr, transp, outline = entry
         elif len(entry) == 7:
@@ -323,20 +327,17 @@ def process_composite(pattern, crops):
             target_name, crop_box, w, h, dither, thr = entry
             transp  = False
             outline = 0
-
         try:
             img_src = img_raw.convert('RGB')
             cropped = img_src.crop(crop_box)
-
             if transp:
                 result = to_rgba_transparent(cropped, w, h, dither, thr)
                 if outline > 0:
                     result = add_outline(result, thickness=outline)
             else:
                 result = to_1bit_opaque(cropped, w, h, dither, thr)
-
             save_result(result, target_name)
-            print(f"  ✅ {os.path.basename(source_path):42s} → {target_name} ({w}×{h}) [crop {crop_box}]")
+            print(f"  ✅ {os.path.basename(source_path):44s} → {target_name} ({w}×{h}) [crop {crop_box}]")
             ok += 1
         except Exception as e:
             print(f"  ❌ Error recortando {target_name}: {e}")
@@ -346,23 +347,35 @@ def process_composite(pattern, crops):
 # ── Main ──────────────────────────────────────────────────────────────────────
 
 def main():
-    print("=" * 70)
-    print("  Plomero Díaz v4.0 — Procesador de Sprites para Playdate")
-    print("=" * 70)
-    print(f"  Origen  : {ARTIFACT_DIR}")
-    print(f"  Destino : {GAME_ASSETS}")
+    print("=" * 72)
+    print("  Plomero Díaz v4.1 — Procesador de Sprites para Playdate")
+    print("=" * 72)
+    print(f"  ARTIFACT_DIR : {ARTIFACT_DIR}")
+    print(f"  GAME_ASSETS  : {GAME_ASSETS}")
     print()
 
     success = 0
     failed  = 0
 
-    print("── Sprites simples ──────────────────────────────────────────────────")
+    # ── 1. Sprites estándar (fuente = ARTIFACT_DIR via glob) ──────────────────
+    print("── Sprites estándar (desde ARTIFACT_DIR) ────────────────────────────")
     for args in SPRITES:
         if process_sprite(*args):
             success += 1
         else:
             failed += 1
 
+    # ── 2. [v4.1 NEW] Fondos extra (fuente = GAME_ASSETS, rutas directas) ─────
+    # fondo2.png → bg_bathroom_2.png  y  fondo3.png → bg_bathroom_3.png
+    print()
+    print("── Fondos adicionales (desde GAME_ASSETS — rutas directas) ──────────")
+    for (src_path, target, w, h, dither, thr) in EXTRA_BACKGROUNDS:
+        if process_sprite_from_path(src_path, target, w, h, dither, thr):
+            success += 1
+        else:
+            failed += 1
+
+    # ── 3. Sprites compuestos (spritesheet → cortes individuales) ─────────────
     print()
     print("── Sprites compuestos (recorte desde spritesheet) ───────────────────")
     for (pattern, crops) in COMPOSITE_CROPS:
@@ -370,16 +383,15 @@ def main():
         success += ok
         failed  += fail
 
+    # ── Resumen final ─────────────────────────────────────────────────────────
     print()
+    print("=" * 72)
     print(f"  Resultado final: {success} OK  |  {failed} fallidos")
-    print()
-    if failed > 0:
-        print("  NOTA: Los sprites fallidos usarán los fallbacks geométricos del juego.")
-        print("  Si los fondos bg_bathroom_1/2/3 no existen por separado, el juego")
-        print("  usará bg_bathroom.png genérico como respaldo automáticamente.")
-    else:
+    if failed == 0:
         print("  ¡Todos los sprites procesados correctamente! Recompila con pdc.")
-    print("=" * 70)
+    else:
+        print("  Los sprites fallidos usarán los fallbacks geométricos del juego.")
+    print("=" * 72)
 
 if __name__ == '__main__':
     main()
